@@ -2,6 +2,7 @@
 using mp.hooks;
 using System;
 using System.Diagnostics;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 using SysTrayOBS;
 
@@ -25,12 +26,11 @@ namespace WinFormsApp1
         {
             private static Settings _settings;
             private NotifyIcon trayIcon;
-            //KeyboardHook h = new KeyboardHook(true);
             ToolStripMenuItem exitMenuItem = null;
             ToolStripMenuItem toggleMicCamMenuItem = null;
             ToolStripMenuItem toggleSceneMenuItem = null;
             ToolStripMenuItem toggleStreamMenuItem = null;
-            OBSClient obsClient = null;
+            OBSClientSM sm = null;
             public MyCustomApplicationContext()
             {
                 var configuration = new ConfigurationBuilder()
@@ -39,77 +39,61 @@ namespace WinFormsApp1
                 .Build();
                 _settings = configuration.GetSection("Settings").Get<Settings>();
                 configuration.Bind(_settings);
-                obsClient = new  OBSClient(_settings.Uri, _settings.Password);
-                exitMenuItem = new ToolStripMenuItem("Exit", null, Exit);
+                sm = new OBSClientSM(_settings.Uri, _settings.Password);
+                exitMenuItem = new ToolStripMenuItem("Exit", null, async (s, e) =>
+                {
+                    try
+                    {
+                        trayIcon.Visible = false;
+                        await sm.DisposeAsync();
+                        Application.Exit();
+                    }
+                    catch{ }
+                });
                 toggleMicCamMenuItem = new ToolStripMenuItem($"Toggle {string.Join("/",_settings.SceneItemsToToggle.SceneItems)}", null, async (s, e) =>
                 {
                     try
                     {
-                        await obsClient.ToggleSceneItems(_settings.SceneItemsToToggle.SceneName, _settings.SceneItemsToToggle.SceneItems);
+                        await sm.ToggleSceneItems(_settings.SceneItemsToToggle.SceneName, _settings.SceneItemsToToggle.SceneItems);
                     }
                     catch (Exception ex)
                     {
                         MessageBox.Show($"Error toggling scene items: {ex.Message}");
                     }
-                });
+                });                
                 toggleSceneMenuItem = new ToolStripMenuItem($"Toggle {string.Join("/", _settings.ScenesToToggle)}", null, async (s, e) =>
                 {
                     try
                     {
-                        await obsClient.ToggleScenes(_settings.ScenesToToggle);
+                        await sm.ToggleScenes(_settings.ScenesToToggle);
                     }
                     catch (Exception ex)
                     {
                         MessageBox.Show($"Error toggling scene: {ex.Message}");
                     }
-                });
+                });                
                 toggleStreamMenuItem = new ToolStripMenuItem("Toggle Stream", null, async (s, e) =>
                 {
                     try
-                    {
-                        await obsClient.ToggleStream();
+                    {                                    
+                        await sm.ToggleStreamAsync();
                     }
                     catch (Exception ex)
                     {
                         MessageBox.Show($"Error toggling stream: {ex.Message}");
                     }
                 });
-
-                //h.KeyDown += async (s, e) =>
-                //{
-                //    if ((ConsoleKey)e.vkCode == ConsoleKey.F1)
-                //    {
-                //        Debug.WriteLine("F1 key pressed");
-                //        await obsClient.ToggleSceneItems("Scene", "WEBCAM", "MIC");
-
-                //    }
-                //    if ((ConsoleKey)e.vkCode == ConsoleKey.F2)
-                //    {
-                //        Debug.WriteLine("F2 key pressed");
-                //        await obsClient.ToggleScenes("Scene", "BRB");
-                //    }
-                //    if ((ConsoleKey)e.vkCode == ConsoleKey.F3)
-                //    {
-                //        Debug.WriteLine("F2 key pressed");
-                //        await obsClient.ToggleStream();  
-                //    }
-                //};
-
-                obsClient.StreamStateChanged.Subscribe(isStreaming =>
+                sm.StreamStateChanged.Subscribe((isStreaming) =>
                 {
-                    Console.WriteLine($"Streaming state changed: {isStreaming}");
-                    if (isStreaming)
-                    {
-                        toggleStreamMenuItem.Image = Resources.redtvimg;
-                    }
-                    else
-                    {
-                        toggleStreamMenuItem.Image = null;
-                    }
+                    toggleStreamMenuItem.Image = isStreaming ? Resources.redtvimg : null;
                 });
-
-                obsClient.Init().Wait();
-
+                sm.StateChanged.Subscribe((connected) =>
+                {
+                    Debug.WriteLine($"OBS Client State Changed: {connected}");
+                    bool enabled = connected == ObsClientState.Ready;
+                    trayIcon?.Icon = (enabled) ? Resources.icons8_twitch_32 : Resources.twitch32;
+                    toggleMicCamMenuItem.Enabled = toggleSceneMenuItem.Enabled = toggleStreamMenuItem.Enabled = enabled;
+                });                
                 trayIcon = new NotifyIcon()
                 {
                     Icon = Resources.twitch32,
@@ -125,12 +109,13 @@ namespace WinFormsApp1
                     },
                     Visible = true
                 };
+                Task.Run(async () => { await sm.StartAsync(); });
             }
 
             void Exit(object? sender, EventArgs e)
             {
                 trayIcon.Visible = false;
-                //h.unhook();
+                sm?.DisposeAsync();
                 Application.Exit();
             }
         }
