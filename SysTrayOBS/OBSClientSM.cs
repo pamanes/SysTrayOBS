@@ -1,6 +1,6 @@
 ﻿using System;
 using System.Collections.Concurrent;
-using System.Diagnostics;
+using System.Collections.Generic;
 using System.Linq;
 using System.Net.WebSockets;
 using System.Reactive.Linq;
@@ -448,7 +448,7 @@ namespace SysTrayOBS
         {
             var currentScene = await GetCurrentSceneAsync();
             var pos = sceneNames.IndexOf(currentScene);
-            var nextScene = sceneNames[(pos + 1) % sceneNames.Length];
+            var nextScene = pos == -1 ? sceneNames[0] : sceneNames[(pos + 1) % sceneNames.Length];            
             await SetCurrentSceneAsync(nextScene);
         }
 
@@ -476,11 +476,43 @@ namespace SysTrayOBS
             }
         }
 
+        public async Task<HashSet<string>> GetAllSceneNames()
+        {
+            var response = await SendRequestAsync("GetSceneList");
+
+            return response
+                .GetProperty("responseData").GetProperty("scenes").EnumerateArray()
+                .Select(scene => scene.GetProperty("sceneName").GetString()!)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        }
+
+        public async Task<bool> ValidateScenesExistAsync(params string[] sceneNames)
+        {
+            if (sceneNames == null || sceneNames.Length == 0)
+                return false;
+
+            var existingScenes = await GetAllSceneNames();
+
+            return sceneNames.All(existingScenes.Contains);
+        }
+
+        public async Task<bool> ValidateSceneItemsExistAsync(string sceneName, params string[] sourceNames)
+        {
+            if (sourceNames == null || sourceNames.Length == 0)
+                return false;
+            var sceneItems = await GetSceneItems(sceneName);
+            if (sceneItems == null)
+                return false;
+            var existingSourceNames = sceneItems.Value
+                .EnumerateArray()
+                .Select(item => item.GetProperty("sourceName").GetString()!)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            return sourceNames.All(existingSourceNames.Contains);
+        }
+
         async Task<JsonElement?> GetSceneItem(string sceneName, string sourceName)
         {
             var response = await SendRequestAsync("GetSceneItemList", new { sceneName });
-            //var ok = response.GetProperty("responseData").GetProperty("sceneItems");
-            //ok.EnumerateArray();
 
             foreach (var item in response.GetProperty("responseData").GetProperty("sceneItems").EnumerateArray())
             {

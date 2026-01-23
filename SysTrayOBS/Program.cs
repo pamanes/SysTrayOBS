@@ -1,6 +1,6 @@
 using System;
 using System.Windows.Forms;
-using WinFormsApp1.TrayOnlyWinFormsDemo;
+using SysTrayOBS;
 
 namespace SysTrayOBS
 {
