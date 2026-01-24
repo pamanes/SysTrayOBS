@@ -13,9 +13,7 @@ namespace SysTrayOBS
         private readonly OBSClientSM _obs;
         private readonly Settings _settings;
 
-        //private readonly ToolStripMenuItem _toggleMicCam;
         private readonly ToolStripMenuItem[] _toggleSceneItems;
-        //private readonly ToolStripMenuItem _toggleScene;
         private readonly ToolStripMenuItem[] _toggleScenes;
         private readonly ToolStripMenuItem _toggleStream;
         private readonly ToolStripMenuItem _exit;
@@ -68,7 +66,6 @@ namespace SysTrayOBS
         private static Settings LoadSettings()
         {
             var config = new ConfigurationBuilder()
-                .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
                 .AddJsonFile("appsettings.prod.json", optional: true, reloadOnChange: true)
                 .Build();
 
