@@ -54,6 +54,27 @@ namespace SysTrayOBS
         {
             _uri = uri;
             _password = password;
+
+            StateChanged.Subscribe(async (state) =>
+            {
+                Console.WriteLine($"[OBS] State changed to: {state}");
+                if (state == ObsClientState.Ready) {
+                    var result = await RunOrQueueAsync<bool>(async () =>
+                    {
+                        var response = await SendRequestAsync("GetStreamStatus");
+
+                        if (!response.TryGetProperty("responseData", out var data) ||
+                            !data.TryGetProperty("outputActive", out var active))
+                        {
+                            return false;
+                        }
+
+                        return active.GetBoolean();
+                    });
+                    _isStreaming = result;
+                    _streamStateChanged.OnNext(result);
+                }
+            });
         }
 
         #region Lifecycle
@@ -332,13 +353,37 @@ namespace SysTrayOBS
 
         #region Ready Queue
 
-        private Task RunOrQueueAsync(Func<Task> action)
+        //private Task RunOrQueueAsync(Func<Task> action)
+        //{
+        //    if (_state == ObsClientState.Ready)
+        //        return action();
+
+        //    _readyQueue.Enqueue(action);
+        //    return Task.CompletedTask;
+        //}
+
+        private Task<T> RunOrQueueAsync<T>(Func<Task<T>> action)
         {
             if (_state == ObsClientState.Ready)
                 return action();
 
-            _readyQueue.Enqueue(action);
-            return Task.CompletedTask;
+            var tcs = new TaskCompletionSource<T>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+
+            _readyQueue.Enqueue(async () =>
+            {
+                try
+                {
+                    var result = await action();
+                    tcs.SetResult(result);
+                }
+                catch (Exception ex)
+                {
+                    tcs.SetException(ex);
+                }
+            });
+
+            return tcs.Task;
         }
 
         private async Task FlushReadyQueueAsync()
@@ -432,27 +477,33 @@ namespace SysTrayOBS
 
         #region Public API
 
-        public Task StartStreamingAsync() =>
-            RunOrQueueAsync(() => SendRequestAsync("StartStream"));
+        public async Task StartStreamingAsync()
+        {
+            await RunOrQueueAsync(async () => await SendRequestAsync("StartStream"));
+        }
 
-        public Task StopStreamingAsync() =>
-            RunOrQueueAsync(() => SendRequestAsync("StopStream"));
+        public async Task StopStreamingAsync() =>
+            await RunOrQueueAsync(async () => await SendRequestAsync("StopStream"));
 
-        public Task ToggleScenes(params string[] sceneNames) =>
-            RunOrQueueAsync(() => ActionToggleScenes(sceneNames));
+        public async Task ToggleScenes(params string[] sceneNames)
+        {
+            await RunOrQueueAsync(async () => await ActionToggleScenes(sceneNames));
+        }
 
-        public Task ToggleSceneItems(string sceneName, params string[] sceneNames) =>
-            RunOrQueueAsync(() => ActionToggleSceneItems(sceneName, sceneNames));
+        public async Task ToggleSceneItems(string sceneName, params string[] sceneNames)
+        {
+            await RunOrQueueAsync(async () => await ActionToggleSceneItems(sceneName, sceneNames));
+        }
 
-        async Task ActionToggleScenes(params string[] sceneNames)
+        async Task<bool> ActionToggleScenes(params string[] sceneNames)
         {
             var currentScene = await GetCurrentSceneAsync();
             var pos = sceneNames.IndexOf(currentScene);
             var nextScene = pos == -1 ? sceneNames[0] : sceneNames[(pos + 1) % sceneNames.Length];            
-            await SetCurrentSceneAsync(nextScene);
+            return await SetCurrentSceneAsync(nextScene);
         }
 
-        async Task ActionToggleSceneItems(string sceneName, params string[] sourceNames)
+        async Task<bool> ActionToggleSceneItems(string sceneName, params string[] sourceNames)
         {
             var sceneItems = await GetSceneItems(sceneName);
             var matchedItems = sceneItems.Value
@@ -464,16 +515,17 @@ namespace SysTrayOBS
             })
             .ToArray();
 
-            var ok = from sceneItem in sceneItems.Value.EnumerateArray()
+            var scenesFound = from sceneItem in sceneItems.Value.EnumerateArray()
                      where sourceNames.Contains(sceneItem.GetProperty("sourceName").GetString()!)
                      select new Tuple<string, bool>(sceneItem.GetProperty("sourceName").GetString()!, sceneItem.GetProperty("sceneItemEnabled").GetBoolean()!);
 
-            var toogleValue = ok.Any(x => x.Item2 == true);
+            var toogleValue = scenesFound.Any(x => x.Item2 == true);
 
-            foreach (var item in ok)
+            foreach (var item in scenesFound)
             {
                 await SetSceneItemEnabledAsync(sceneName, item.Item1, !toogleValue);
             }
+            return true;
         }
 
         public async Task<HashSet<string>> GetAllSceneNames()
@@ -557,14 +609,16 @@ namespace SysTrayOBS
             return response.GetProperty("responseData").GetProperty("sceneItems");
         }
 
-        public Task ToggleStreamAsync() =>
-            RunOrQueueAsync(async () =>
+        public async Task ToggleStreamAsync()
+        {
+            await RunOrQueueAsync(async () =>
             {
                 if (_isStreaming)
-                    await SendRequestAsync("StopStream");
+                    return await SendRequestAsync("StopStream");
                 else
-                    await SendRequestAsync("StartStream");
+                    return await SendRequestAsync("StartStream");
             });
+        }
 
         #endregion
 

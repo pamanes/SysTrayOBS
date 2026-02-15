@@ -27,19 +27,19 @@ namespace SysTrayOBS
             .Select(cfg =>
                 CreateMenuItem(
                     $"Toggle {cfg.SceneName} Items: ({string.Join("/", cfg.SceneItems)})",
-                    () => _obs.ToggleSceneItems(cfg.SceneName, cfg.SceneItems)))
+                    async () => await _obs.ToggleSceneItems(cfg.SceneName, cfg.SceneItems)))
             .ToArray();
 
             _toggleScenes = _settings.ScenesToToggle
                 .Select(g =>
                     CreateMenuItem(
                         $"Toggle Scene: ({string.Join(" ↔ ", g.Scenes)})",
-                        () => _obs.ToggleScenes(g.Scenes)))
+                        async () => await _obs.ToggleScenes(g.Scenes)))
                 .ToArray();
 
             _toggleStream = CreateMenuItem(
                 "Toggle Stream",
-                _obs.ToggleStreamAsync);
+                async () => { await _obs.ToggleStreamAsync(); });
 
             _exit = new ToolStripMenuItem("Exit", null, async (_, _) => await ShutdownAsync());
 
